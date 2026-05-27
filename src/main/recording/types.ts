@@ -2,7 +2,7 @@
 // agent that opens a finished recording and reverse-engineers the site's API
 // from it — so every field is captured faithfully and named to be self-evident.
 // A run carries no source code, only observed traffic and state; the in-run
-// CLAUDE.md guide explains how to interpret these structures.
+// AGENTS.md guide explains how to interpret these structures.
 
 export const SCHEMA_VERSION = 1
 

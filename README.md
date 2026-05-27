@@ -53,7 +53,7 @@ A run lands in `<sessionsRoot>/<runId>/`, where `runId` is `YYYY-MM-DD_HHhMM_<la
 and `sessionsRoot` is configurable in **Settings** (default `Documents/Decoy/sessions`):
 
 ```
-CLAUDE.md                # agent guide: how to read THIS run (auto-written into every run)
+AGENTS.md                # agent guide: how to read THIS run (auto-written into every run)
 summary.md               # orientation: pages visited, top API hosts/endpoints, resource-type counts
 manifest.json            # label, startUrl, counts, hostCounts (API surface), schemaVersion, generator
 network.jsonl            # one line per request — index (pageTitle, graphqlOperation, pause/resume markers)
@@ -66,16 +66,16 @@ websockets/NNNN_host_path.json
 screenshots/NNNN_<safe-url>.png
 ```
 
-Every run includes a **`CLAUDE.md`** that briefs an agent on how to interpret these files
+Every run includes a **`AGENTS.md`** that briefs an agent on how to interpret these files
 (where auth lives, how to find a request, how to replay it, what an empty body means, etc.).
-The full schema is documented inline in `src/main/recording/types.ts` and in
-`docs/superpowers/specs/2026-05-26-decoy-session-recorder-design.md`.
+The full schema is documented inline in `src/main/recording/types.ts`.
 
 ## Consuming a recording
 
 Point any downstream tool — or an agent — at the run folder. Because each run carries its own
-`CLAUDE.md`, opening a session in Claude Code auto-loads instructions for reading it. Set the
-output folder once in **Settings**; anything that reads from that folder consumes Decoy runs.
+`AGENTS.md`, any AI agent or coding assistant that supports agent instruction files will
+auto-load the reading guide for that session. Set the output folder once in **Settings**;
+anything that reads from that folder consumes Decoy runs.
 
 ## DevTools while recording
 
@@ -93,7 +93,7 @@ Runtime capture behavior is verified by recording, not unit tests:
 - [ ] Record a page with a **WebSocket** → a file in `websockets/` with frames.
 - [ ] Record an **SSE** endpoint → its body is present (`response.streamed: true`).
 - [ ] Open **F12** mid-recording, close it → capture resumes; counts keep climbing.
-- [ ] `cookies.json`, `storage.json`, `screenshots/`, `session.har`, `CLAUDE.md` all written.
+- [ ] `cookies.json`, `storage.json`, `screenshots/`, `session.har`, `AGENTS.md` all written.
 
 ## Architecture
 
@@ -105,6 +105,6 @@ runtime transpiler.
 - `src/main/recording/recorder.ts` — multi-target CDP recorder (the core).
 - `src/main/recording/window.ts` — `BaseWindow` + toolbar/site views, popup capture, F12 handoff.
 - `src/main/recording/{filters,naming,storage,types,har}.ts` — supporting modules.
-- `src/main/recording/session-guide.md` — inlined (`?raw`) and written as `CLAUDE.md` into each run.
+- `src/main/recording/session-guide.md` — inlined (`?raw`) and written as `AGENTS.md` into each run.
 - `src/preload/{index,popup,toolbar}.ts` — contextBridge surfaces (built to `out/preload/*.mjs`).
 - `src/renderer/` — React control panel + `recorder-toolbar/` (New recording / Recordings / Settings).

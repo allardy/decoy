@@ -95,10 +95,10 @@ export async function writeStorageSnapshot(runDir: string, storage: unknown): Pr
   await writeFile(join(runDir, 'storage.json'), JSON.stringify(storage, null, 2), 'utf8')
 }
 
-// Copies the agent reading guide into the run as CLAUDE.md, so an LLM pointed at
-// the folder is auto-briefed on how to interpret the captured data.
+// Copies the agent reading guide into the run as AGENTS.md so any AI agent pointed
+// at the folder is auto-briefed on how to interpret the captured data.
 export async function writeSessionGuide(runDir: string): Promise<void> {
-  await writeFile(join(runDir, 'CLAUDE.md'), sessionGuide, 'utf8')
+  await writeFile(join(runDir, 'AGENTS.md'), sessionGuide, 'utf8')
 }
 
 export async function listRecordings(root: string): Promise<RecordingSummary[]> {

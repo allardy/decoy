@@ -1130,7 +1130,7 @@ export class Recorder {
       lines.push('- ⚠ Some capture steps errored — this run may be incomplete.')
     }
 
-    lines.push('', 'Read `CLAUDE.md` in this folder for how to interpret the files.', '')
+    lines.push('', 'Read `AGENTS.md` in this folder for how to interpret the files.', '')
 
     if (this.pages.size) {
       lines.push('## Pages visited', '')
