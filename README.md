@@ -1,9 +1,8 @@
 # Decoy
 
-The **one master browser-session recorder**. Decoy opens a real, logged-in browser
-window and faithfully records _everything_ needed to later reverse-engineer, replay, or
-extract from a site's API — across the main page, popups, child windows, iframes, and
-workers:
+Decoy records a real, logged-in browser session **completely** — _everything_ needed to
+later reverse-engineer, replay, or extract from a site's API, across the main page, popups,
+child windows, iframes, and workers:
 
 - every **request/response** with full bodies, app headers **and** on-the-wire headers
   (`requestWillBeSentExtraInfo` / `responseReceivedExtraInfo`), sent cookies + `Set-Cookie`,
