@@ -1,6 +1,6 @@
 {
   "name": "decoy",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Decoy — the master browser-session recorder. Faithfully captures every request/response, cookie, storage, WebSocket frame and screenshot across pages, popups, iframes and workers, so downstream modules can replay/extract without reimplementing capture.",
   "license": "MIT",
