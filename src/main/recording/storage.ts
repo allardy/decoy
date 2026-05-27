@@ -1,9 +1,9 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, rename, rm, writeFile, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import { domainLabel, requestFileName, runIdPrefix, runIdSlug, screenshotFileName, wsFileName } from './naming.js'
+import sessionGuide from './session-guide.md?raw'
 import type {
   NavigationLogLine,
   NetworkLogLine,
@@ -98,14 +98,7 @@ export async function writeStorageSnapshot(runDir: string, storage: unknown): Pr
 // Copies the agent reading guide into the run as CLAUDE.md, so an LLM pointed at
 // the folder is auto-briefed on how to interpret the captured data.
 export async function writeSessionGuide(runDir: string): Promise<void> {
-  try {
-    const src = fileURLToPath(new URL('./session-guide.md', import.meta.url))
-    const md = await readFile(src, 'utf8')
-
-    await writeFile(join(runDir, 'CLAUDE.md'), md, 'utf8')
-  } catch {
-    // template missing (unexpected) — non-fatal, the run is still valid
-  }
+  await writeFile(join(runDir, 'CLAUDE.md'), sessionGuide, 'utf8')
 }
 
 export async function listRecordings(root: string): Promise<RecordingSummary[]> {

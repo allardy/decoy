@@ -7,9 +7,8 @@
 //   node scripts/make-icon.mjs   (or `pnpm icon`)
 //
 // Outputs:
-//   public/decoy-icon.svg   — favicon (index.html) + design source
-//   public/decoy-icon.png   — runtime window/taskbar icon (dev + packaged)
-//   build/icon.png          — electron-builder source (generates .ico/.icns)
+//   src/renderer/public/decoy-icon.svg — favicon (index.html) + design source
+//   build/icon.png                     — electron-builder source (.ico/.icns) + runtime window icon
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -209,8 +208,8 @@ ${rings}
 const png = encodePng(render(), SIZE, SIZE)
 
 mkdirSync(join(root, 'build'), { recursive: true })
-writeFileSync(join(root, 'public/decoy-icon.svg'), buildSvg())
-writeFileSync(join(root, 'public/decoy-icon.png'), png)
+mkdirSync(join(root, 'src/renderer/public'), { recursive: true })
+writeFileSync(join(root, 'src/renderer/public/decoy-icon.svg'), buildSvg())
 writeFileSync(join(root, 'build/icon.png'), png)
 
-console.log(`wrote public/decoy-icon.svg, public/decoy-icon.png, build/icon.png (${SIZE}x${SIZE}, ${png.length} bytes)`)
+console.log(`wrote src/renderer/public/decoy-icon.svg, build/icon.png (${SIZE}x${SIZE}, ${png.length} bytes)`)

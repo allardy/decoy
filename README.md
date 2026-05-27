@@ -22,11 +22,11 @@ tools built on top of a run's output.
 
 ```bash
 pnpm install
-pnpm electron:dev      # control panel + recorder (development)
-decoy                  # shortcut for `pnpm electron:dev` (cmd; use .\decoy in PowerShell)
+pnpm dev               # control panel + recorder (electron-vite dev, HMR)
+decoy                  # shortcut for `pnpm dev` (cmd; use .\decoy in PowerShell)
 pnpm test              # unit tests (naming, filters, config, HAR, rename)
-pnpm build             # typecheck + bundle the renderer
-pnpm dist              # package the app (electron-builder)
+pnpm build             # bundle main + preloads + renderer to out/
+pnpm package           # build + package the app (electron-builder → release/)
 ```
 
 **Auto-record vs. pause.** New recordings start capturing immediately. Untick **Auto-record**
@@ -39,14 +39,13 @@ resource types (Image, Script, …) and URL substrings (analytics hosts, …) ar
 restores the defaults; **Capture all** on a recording overrides the filters entirely. Stored in
 `decoy.json` and applied to each new recording.
 
-**`pnpm electron:dev` is the only command you need in development.** It starts the Vite dev
-server itself (HMR for the control panel) and opens the app once Vite is reachable. `pnpm dev`
-runs only the Vite renderer if you want it standalone. The main process runs the TypeScript
-engine directly via `tsx`.
+**`pnpm dev` is the only command you need in development.** electron-vite serves the control
+panel with HMR on an ephemeral port and launches Electron with that URL injected — no fixed
+port to collide with other apps, nothing to start by hand.
 
-In a **packaged** build there is no server at all: the renderer is pre-built to `dist/` and
-loaded from disk (`loadFile`), and the recording engine runs inside the Electron main process.
-So the packaged app starts everything by itself.
+In a **packaged** build there is no server at all: the renderer is pre-built and loaded from
+disk (`loadFile`), and the recording engine is bundled into the Electron main process as plain
+JS. So the packaged app starts everything by itself — no runtime transpiler.
 
 ## What a recording contains
 
@@ -98,10 +97,14 @@ Runtime capture behavior is verified by recording, not unit tests:
 
 ## Architecture
 
-- `electron.mjs` — main process: window lifecycle, UA/client-hints spoof, IPC, config.
+Bundled by **electron-vite** into `out/{main,preload,renderer}` — packaged as plain JS, no
+runtime transpiler.
+
+- `src/main/index.ts` — main process: window lifecycle, UA/client-hints spoof, IPC, config.
 - `src/main/config*.ts` — configurable sessions root (pure core + Electron wrapper).
 - `src/main/recording/recorder.ts` — multi-target CDP recorder (the core).
 - `src/main/recording/window.ts` — `BaseWindow` + toolbar/site views, popup capture, F12 handoff.
 - `src/main/recording/{filters,naming,storage,types,har}.ts` — supporting modules.
-- `src/main/recording/session-guide.md` — the `CLAUDE.md` written into each run.
-- `src/ui/` — React control panel (New recording / Recordings / Settings).
+- `src/main/recording/session-guide.md` — inlined (`?raw`) and written as `CLAUDE.md` into each run.
+- `src/preload/{index,popup,toolbar}.ts` — contextBridge surfaces (built to `out/preload/*.mjs`).
+- `src/renderer/` — React control panel + `recorder-toolbar/` (New recording / Recordings / Settings).

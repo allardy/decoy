@@ -1,33 +1,27 @@
 {
   "name": "decoy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Decoy — the master browser-session recorder. Faithfully captures every request/response, cookie, storage, WebSocket frame and screenshot across pages, popups, iframes and workers, so downstream modules can replay/extract without reimplementing capture.",
   "author": "Yann Allard",
   "type": "module",
-  "main": "electron.mjs",
+  "main": "out/main/index.js",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "electron": "cross-env NODE_ENV=production electron .",
-    "electron:dev": "cross-env NODE_ENV=development electron .",
-    "dist": "pnpm run build && electron-builder",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "electron-vite build && electron-builder",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check:type": "tsc --noEmit",
     "check:lint": "oxlint -c .oxlintrc.json",
     "fix:lint": "oxlint -c .oxlintrc.json --fix",
     "check:format": "oxfmt --check .",
     "fix:format": "oxfmt --write .",
-    "check": "pnpm check:lint && pnpm check:format",
+    "check": "pnpm check:format && pnpm check:lint && pnpm check:type",
     "fix": "pnpm fix:lint && pnpm fix:format",
     "lint": "pnpm check:lint",
     "icon": "node scripts/make-icon.mjs"
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@oxfmt/binding-win32-x64-msvc": "0.47.0",
@@ -37,11 +31,13 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "cross-env": "^7.0.3",
     "electron": "^38.4.0",
     "electron-builder": "^25.1.8",
+    "electron-vite": "^5.0.0",
     "oxfmt": "^0.47.0",
     "oxlint": "^1.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "~5.6.3",
     "vite": "^6.0.3",
     "vitest": "^2.1.8"
@@ -52,36 +48,5 @@
       "electron",
       "esbuild"
     ]
-  },
-  "build": {
-    "appId": "com.decoy.app",
-    "productName": "Decoy",
-    "directories": {
-      "output": "dist-electron"
-    },
-    "files": [
-      "dist/**/*",
-      "electron.mjs",
-      "preload.cjs",
-      "popup-preload.cjs",
-      "src/main/**/*",
-      "public/**/*",
-      "package.json"
-    ],
-    "asarUnpack": [
-      "node_modules/**/*"
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "build/icon.png"
-    },
-    "mac": {
-      "target": "dmg",
-      "icon": "build/icon.png"
-    },
-    "linux": {
-      "target": "AppImage",
-      "icon": "build/icon.png"
-    }
   }
 }

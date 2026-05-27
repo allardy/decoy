@@ -1,4 +1,4 @@
-import { app, BaseWindow, session, WebContentsView, type WebContents } from 'electron'
+import { BaseWindow, session, WebContentsView, type WebContents } from 'electron'
 import { join } from 'node:path'
 
 import { writeHarForRun } from './har.js'
@@ -32,6 +32,7 @@ export interface CreateRecorderOptions {
   toolbarUrl: string
   sessionsRoot: string
   userAgent: string
+  icon: string
   onProgress: (counts: { requests: number; websockets: number }) => void
   onClosed: (handle: RecordingHandle) => void
 }
@@ -72,7 +73,7 @@ export async function createRecorderWindow(opts: CreateRecorderOptions): Promise
   ses.setUserAgent(opts.userAgent)
 
   // Match real Chrome's client hints + language so Chrome-only sniffers load.
-  // Keep these versions in sync with USER_AGENT (electron.mjs) and popup-preload.cjs.
+  // Keep these versions in sync with USER_AGENT (src/main/index.ts) and preload/popup.ts.
   ses.webRequest.onBeforeSendHeaders((details, callback) => {
     const headers = { ...details.requestHeaders }
 
@@ -84,20 +85,21 @@ export async function createRecorderWindow(opts: CreateRecorderOptions): Promise
     callback({ requestHeaders: headers })
   })
 
-  const popupPreload = join(app.getAppPath(), 'popup-preload.cjs')
+  const popupPreload = join(import.meta.dirname, '../preload/popup.mjs')
 
   const window = new BaseWindow({
     width: 1280,
     height: 920,
     title: `Decoy — ${opts.label}`,
     backgroundColor: '#18181b',
-    icon: join(app.getAppPath(), 'public/decoy-icon.png'),
+    icon: opts.icon,
   })
 
   const toolbar = new WebContentsView({
     webPreferences: {
       contextIsolation: true,
-      preload: join(app.getAppPath(), 'src/main/recording/toolbar-preload.cjs'),
+      sandbox: false,
+      preload: join(import.meta.dirname, '../preload/toolbar.mjs'),
     },
   })
   const site = new WebContentsView({

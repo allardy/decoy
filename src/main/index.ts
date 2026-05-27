@@ -1,27 +1,40 @@
-import { app, BaseWindow, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'electron'
-import { spawn, execSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { register } from 'tsx/esm/api'
+import { app, BaseWindow, BrowserWindow, dialog, ipcMain, Menu, session, shell, type WebContents } from 'electron'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-// Run the TypeScript recording engine directly in the main process.
-register()
+import {
+  addUrlToHistory,
+  clearUrlHistory,
+  getConfig,
+  getFilters,
+  getSessionsRoot,
+  resetFilters,
+  setFilters,
+  setSessionsRoot,
+} from './config.js'
+import { deleteRecording, listRecordings, renameRecording } from './recording/storage.js'
+import { createRecorderWindow, type RecordingHandle } from './recording/window.js'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
-const DEV_URL = 'http://localhost:5273'
+// In dev, electron-vite serves the renderer on an ephemeral port and sets this. In a packaged
+// build it is undefined and the renderer is loaded from disk via loadFile().
+const RENDERER_URL = process.env.ELECTRON_RENDERER_URL
 
 // Chrome 140 — clears modern browser sniffers (Slack's min is Chrome 137).
-// Keep in sync with the Sec-Ch-Ua header in window.ts and brands in popup-preload.cjs.
+// Keep in sync with the Sec-Ch-Ua header in recording/window.ts and brands in preload/popup.ts.
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
 
+// Window icon: shipped to resources/ via electron-builder extraResources when packaged; the
+// repo's build/icon.png in dev (import.meta.dirname is out/main in both dev and packaged builds).
+const WINDOW_ICON = app.isPackaged
+  ? join(process.resourcesPath, 'icon.png')
+  : join(import.meta.dirname, '../../build/icon.png')
+
 app.userAgentFallback = USER_AGENT
 
-// F12 / Ctrl+Shift+I per-webContents (control panel + any plain window). The
-// recorder window binds its own handoff-aware handler in window.ts.
-const bindDevTools = (contents) => {
+// F12 / Ctrl+Shift+I per-webContents (control panel + any plain window). The recorder window
+// binds its own handoff-aware handler in recording/window.ts.
+const bindDevTools = (contents: WebContents): void => {
   contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') {
       return
@@ -63,12 +76,12 @@ Menu.setApplicationMenu(
   ]),
 )
 
-let mainWindow = null
-let activeRecording = null
-let viteProcess = null
+let mainWindow: BrowserWindow | null = null
+let activeRecording: RecordingHandle | null = null
+let starting = false
 
 // Broadcast an event to every renderer (only the control panel listens).
-function broadcast(channel, ...args) {
+function broadcast(channel: string, ...args: unknown[]): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) {
       w.webContents.send(channel, ...args)
@@ -76,99 +89,45 @@ function broadcast(channel, ...args) {
   }
 }
 
-// The control panel's view of the live recording: null when idle, or its
-// identity while a run is in progress (so a panel reload re-syncs its banner).
-function activeRecordingInfo() {
-  if (!activeRecording || !activeRecording.runId) {
+// The control panel's view of the live recording: null when idle, or its identity while a run
+// is in progress (so a panel reload re-syncs its banner).
+function activeRecordingInfo(): { runId: string; label: string } | null {
+  if (!activeRecording) {
     return null
   }
 
   return { runId: activeRecording.runId, label: activeRecording.label }
 }
 
-// --- dev renderer server ---------------------------------------------------
-// In development the React control panel is served by Vite (HMR). In a packaged
-// build there is NO server: the renderer is pre-built to dist/ and loaded from
-// disk via loadFile(). So we only spawn Vite when running unpackaged.
-
-function startVite() {
-  if (viteProcess) {
-    return
+// In dev the toolbar is served by the dev server; in prod it's a built renderer entry on disk.
+function toolbarUrlBase(): string {
+  if (RENDERER_URL) {
+    return `${RENDERER_URL}/recorder-toolbar/index.html`
   }
 
-  console.log('Starting Vite dev server…')
-  viteProcess = spawn('pnpm', ['dev'], { cwd: __dirname, shell: true, stdio: 'inherit' })
-  viteProcess.on('error', (err) => console.error('Failed to start Vite:', err))
-  viteProcess.on('exit', () => {
-    viteProcess = null
-  })
+  return pathToFileURL(join(import.meta.dirname, '../renderer/recorder-toolbar/index.html')).href
 }
 
-function stopVite() {
-  if (!viteProcess) {
-    return
-  }
-
-  try {
-    if (process.platform === 'win32') {
-      execSync(`taskkill /pid ${viteProcess.pid} /T /F`, { stdio: 'ignore' })
-    } else {
-      viteProcess.kill()
-    }
-  } catch {
-    // already gone
-  }
-
-  viteProcess = null
-}
-
-// --- dynamic imports of the TS engine (tsx-loaded) -------------------------
-
-const importEngine = (rel) => import(`file:///${join(__dirname, rel).replace(/\\/g, '/')}`)
-
-const getSessionsRoot = async () => {
-  const { getSessionsRoot } = await importEngine('src/main/config.ts')
-
-  return getSessionsRoot()
-}
-
-// --- windows ---------------------------------------------------------------
-
-function createMainWindow() {
+function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 780,
     title: 'Decoy',
-    icon: join(__dirname, 'public/decoy-icon.png'),
+    icon: WINDOW_ICON,
     backgroundColor: '#18181b',
     webPreferences: {
-      preload: join(__dirname, 'preload.cjs'),
+      preload: join(import.meta.dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
   })
   bindDevTools(mainWindow.webContents)
 
-  if (isDev) {
-    // Vite may still be booting when the window opens — retry until it answers.
-    const loadDev = () => {
-      if (!mainWindow || mainWindow.isDestroyed()) {
-        return
-      }
-
-      mainWindow.loadURL(DEV_URL).catch(() => {})
-    }
-
-    mainWindow.webContents.on('did-fail-load', (_e, errorCode) => {
-      if (errorCode === -3) {
-        return
-      } // ERR_ABORTED — normal during navigation
-
-      setTimeout(loadDev, 400)
-    })
-    loadDev()
+  if (RENDERER_URL) {
+    void mainWindow.loadURL(RENDERER_URL)
   } else {
-    void mainWindow.loadFile(join(__dirname, 'dist/index.html'))
+    void mainWindow.loadFile(join(import.meta.dirname, '../renderer/index.html'))
   }
 
   mainWindow.on('closed', () => {
@@ -179,11 +138,11 @@ function createMainWindow() {
 // --- IPC -------------------------------------------------------------------
 
 ipcMain.handle('recording:start', async (_event, payload) => {
-  if (activeRecording) {
+  if (activeRecording || starting) {
     throw new Error('A recording is already in progress')
   }
 
-  activeRecording = { pending: true }
+  starting = true
 
   try {
     const startUrl = String(payload.startUrl ?? '')
@@ -198,16 +157,8 @@ ipcMain.handle('recording:start', async (_event, payload) => {
       }
     }
 
-    const { addUrlToHistory, getFilters } = await importEngine('src/main/config.ts')
-
     await addUrlToHistory(startUrl)
     const filters = await getFilters()
-
-    const { createRecorderWindow } = await importEngine('src/main/recording/window.ts')
-
-    const toolbarUrl = isDev
-      ? `${DEV_URL}/recorder-toolbar/index.html`
-      : `file:///${join(__dirname, 'dist/recorder-toolbar/index.html').replace(/\\/g, '/')}`
 
     const handle = await createRecorderWindow({
       label,
@@ -217,9 +168,10 @@ ipcMain.handle('recording:start', async (_event, payload) => {
       filters,
       autoRecord: payload.autoRecord ?? true,
       exportHar: payload.exportHar !== false,
-      toolbarUrl,
+      toolbarUrl: toolbarUrlBase(),
       sessionsRoot: await getSessionsRoot(),
       userAgent: USER_AGENT,
+      icon: WINDOW_ICON,
       onProgress: (counts) => broadcast('recording:progress', counts),
       onClosed: () => {
         activeRecording = null
@@ -231,15 +183,12 @@ ipcMain.handle('recording:start', async (_event, payload) => {
     broadcast('recording:started', activeRecordingInfo())
 
     return { runId: handle.runId }
-  } catch (err) {
-    activeRecording = null
-    throw err
+  } finally {
+    starting = false
   }
 })
 
 ipcMain.handle('recording:list', async () => {
-  const { listRecordings } = await importEngine('src/main/recording/storage.ts')
-
   return listRecordings(await getSessionsRoot())
 })
 
@@ -254,8 +203,6 @@ ipcMain.handle('recording:open-folder', async (_event, runId) => {
 })
 
 ipcMain.handle('recording:delete', async (_event, runId) => {
-  const { deleteRecording } = await importEngine('src/main/recording/storage.ts')
-
   await deleteRecording(await getSessionsRoot(), runId)
 
   return { success: true }
@@ -266,19 +213,17 @@ ipcMain.handle('recording:rename', async (_event, runId, name) => {
     throw new Error('invalid runId')
   }
 
-  const { renameRecording } = await importEngine('src/main/recording/storage.ts')
-
   return renameRecording(await getSessionsRoot(), runId, String(name ?? ''))
 })
 
 ipcMain.on('recorder:toolbar-stop', () => {
-  if (activeRecording && activeRecording.window) {
+  if (activeRecording) {
     activeRecording.window.close()
   }
 })
 
 ipcMain.on('recorder:toolbar-pause-toggle', () => {
-  if (activeRecording && activeRecording.togglePause) {
+  if (activeRecording) {
     activeRecording.togglePause()
   }
 })
@@ -287,7 +232,7 @@ ipcMain.handle('recording:active', () => activeRecordingInfo())
 
 // Stop & save the live recording from the control panel (mirrors the toolbar Stop).
 ipcMain.handle('recording:stop', () => {
-  if (activeRecording && activeRecording.window) {
+  if (activeRecording) {
     activeRecording.window.close()
   }
 
@@ -298,7 +243,7 @@ ipcMain.handle('recording:stop', () => {
 ipcMain.handle('recording:confirm-delete', async (_event, label) => {
   const parent = mainWindow instanceof BaseWindow ? mainWindow : undefined
   const opts = {
-    type: 'warning',
+    type: 'warning' as const,
     buttons: ['Cancel', 'Delete'],
     defaultId: 0,
     cancelId: 0,
@@ -311,17 +256,9 @@ ipcMain.handle('recording:confirm-delete', async (_event, label) => {
   return { confirmed: response === 1 }
 })
 
-ipcMain.handle('config:get', async () => {
-  const { getConfig } = await importEngine('src/main/config.ts')
+ipcMain.handle('config:get', () => getConfig())
 
-  return getConfig()
-})
-
-ipcMain.handle('config:set-sessions-root', async (_event, root) => {
-  const { setSessionsRoot } = await importEngine('src/main/config.ts')
-
-  return setSessionsRoot(String(root ?? ''))
-})
+ipcMain.handle('config:set-sessions-root', (_event, root) => setSessionsRoot(String(root ?? '')))
 
 ipcMain.handle('config:pick-folder', async () => {
   const parent = mainWindow instanceof BaseWindow ? mainWindow : undefined
@@ -336,36 +273,22 @@ ipcMain.handle('config:pick-folder', async () => {
   return { canceled: false, path: result.filePaths[0] }
 })
 
-ipcMain.handle('config:clear-history', async () => {
-  const { clearUrlHistory } = await importEngine('src/main/config.ts')
+ipcMain.handle('config:clear-history', () => clearUrlHistory())
 
-  return clearUrlHistory()
-})
-
-ipcMain.handle('config:set-filters', async (_event, filters) => {
-  const { setFilters } = await importEngine('src/main/config.ts')
-
+ipcMain.handle('config:set-filters', (_event, filters) => {
   return setFilters({
     skipResourceTypes: Array.isArray(filters?.skipResourceTypes) ? filters.skipResourceTypes.map(String) : [],
     blockHosts: Array.isArray(filters?.blockHosts) ? filters.blockHosts.map(String) : [],
   })
 })
 
-ipcMain.handle('config:reset-filters', async () => {
-  const { resetFilters } = await importEngine('src/main/config.ts')
-
-  return resetFilters()
-})
+ipcMain.handle('config:reset-filters', () => resetFilters())
 
 // --- lifecycle -------------------------------------------------------------
 
 app.whenReady().then(() => {
   // Apply the spoofed UA to the default session too (control panel uses it).
   session.defaultSession.setUserAgent(USER_AGENT)
-
-  if (isDev) {
-    startVite()
-  }
 
   createMainWindow()
 
@@ -376,11 +299,7 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', stopVite)
-
 app.on('window-all-closed', () => {
-  stopVite()
-
   if (process.platform !== 'darwin') {
     app.quit()
   }

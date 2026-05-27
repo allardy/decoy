@@ -44,7 +44,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: dist-electron/*.exe
+          path: release/*.exe
 
   build-mac:
     needs: check
@@ -59,14 +59,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # No --universal: decoy loads its TS engine via tsx/esbuild at runtime (asarUnpack'd
-      # node_modules), and pnpm only installs the host-arch esbuild binary, so a merged
-      # universal app would ship a broken Intel slice. Build the runner's native arch (arm64).
-      - run: pnpm exec electron-builder --mac --publish never
+      - run: pnpm exec electron-builder --mac --universal --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: mac
-          path: dist-electron/*.dmg
+          path: release/*.dmg
 
   build-linux:
     needs: check
@@ -85,7 +82,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: dist-electron/*.AppImage
+          path: release/*.AppImage
 
   release:
     needs: [check, build-windows, build-mac, build-linux]

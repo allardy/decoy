@@ -11,20 +11,24 @@ extraction lives here. Each run is written to be self-describing (see "Output", 
 
 ## Commands
 
-- `pnpm electron:dev` (or `decoy` / `.\decoy`) — dev: **the main process spawns Vite itself**
-  and loads the app once it's reachable. One command; don't run Vite separately.
-- `pnpm dev` — Vite renderer only (port 5273), rarely needed alone.
-- `pnpm build` — `tsc --noEmit && vite build`. `pnpm dist` — electron-builder package.
-- `pnpm test` — Vitest (pure-logic units). `pnpm check` / `pnpm fix` — oxlint + oxfmt.
+- `pnpm dev` (or `decoy` / `.\decoy`) — electron-vite dev: builds main/preload, serves the
+  renderer with HMR on an **ephemeral port**, and launches Electron with the renderer URL
+  injected via `ELECTRON_RENDERER_URL`. One command.
+- `pnpm build` — `electron-vite build` (bundles main + preloads + renderer to `out/`).
+- `pnpm package` — `build` + electron-builder → installer in `release/`.
+- `pnpm test` — Vitest (pure-logic units). `pnpm check` (format + lint + typecheck) / `pnpm fix`.
 
-**Verify before claiming done:** `pnpm exec tsc --noEmit`, `pnpm test`, `pnpm check`. The
-GUI capture behaviour can't be unit-tested — verify it by recording (checklist in README).
+**Verify before claiming done:** `pnpm check`, `pnpm test`. The GUI capture behaviour can't be
+unit-tested — verify it by building (`pnpm package`) and recording (checklist in README).
 
 ## Architecture
 
-- `electron.mjs` — main process (plain JS). Uses `tsx/esm/api` `register()` to import the
-  **TypeScript engine in `src/main/` directly** at runtime (dev and packaged). Owns windows,
-  UA/client-hints spoof, IPC, and spawns Vite in dev.
+Bundled by **electron-vite** (`electron.vite.config.ts`) into `out/{main,preload,renderer}` —
+no runtime transpiler; `package.json` `main` is `out/main/index.js`.
+
+- `src/main/index.ts` — main process. Imports the **TypeScript engine in `src/main/` directly**
+  (bundled at build time). Owns windows, UA/client-hints spoof, IPC. In dev it loads
+  `ELECTRON_RENDERER_URL`; packaged it `loadFile`s `out/renderer/index.html`.
 - `src/main/recording/` — the engine:
   - `recorder.ts` — **multi-target CDP recorder** (the core). Attaches to the site view +
     popups; `Target.setAutoAttach({flatten:true})` surfaces iframes/workers/service-workers
@@ -37,14 +41,17 @@ GUI capture behaviour can't be unit-tested — verify it by recording (checklist
     `graphql.ts`, `nextjs.ts`, `types.ts` (the schema), `session-guide.md`.
 - `src/main/config-core.ts` (pure, tested) + `config.ts` (Electron wrapper) — `decoy.json` in
   userData: `{ sessionsRoot, urlHistory, filters }`.
-- `src/ui/` — React control panel (lean: no component lib, no RPC). `bridge.ts` types the
-  preload `window.decoy`.
-- `preload.cjs` (control panel), `popup-preload.cjs` (UA-data spoof for the recorded site),
-  `public/recorder-toolbar/` (the REC/Pause/Stop toolbar).
+- `src/renderer/` — React control panel (lean: no component lib, no RPC; `bridge.ts` types the
+  preload `window.decoy`) + `recorder-toolbar/index.html` (the REC/Pause/Stop toolbar, a static
+  second renderer entry).
+- `src/preload/{index,popup,toolbar}.ts` — control-panel bridge, UA-data spoof for the recorded
+  site, and the toolbar bridge. Built to `out/preload/*.mjs` (ESM → loaded with `sandbox:false`);
+  referenced from main via `import.meta.dirname`.
 
-In a **packaged** build there is no server: the renderer is prebuilt to `dist/` and loaded via
-`loadFile`. `build.files` must include `src/main/**/*` (incl. `session-guide.md`) so tsx can
-load the engine, and `asarUnpack` node_modules so esbuild's binary runs.
+In a **packaged** build there is no server: the renderer is prebuilt to `out/renderer/` and
+loaded via `loadFile`, and the whole app is plain JS in `out/` — the asar carries no
+node_modules and nothing is transpiled or spawned at runtime. `session-guide.md` is inlined
+into the main bundle via `?raw`.
 
 ## Conventions (enforced — see `.oxlintrc.json` / `.oxfmtrc.json`)
 
