@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Recording</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font:
+          13px -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          system-ui,
+          sans-serif;
+        background: #18181b;
+        color: #fafafa;
+        height: 100vh;
+        overflow: hidden;
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 100%;
+        padding: 0 16px;
+      }
+      .badge {
+        background: #ef4444;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        animation: pulse 2s infinite;
+      }
+      .badge.paused {
+        background: #f59e0b;
+        color: #11111b;
+        animation: none;
+      }
+      .all {
+        background: #818cf8;
+        color: #11111b;
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+      }
+      .elapsed {
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        color: #a1a1aa;
+        white-space: nowrap;
+      }
+      @keyframes pulse {
+        50% {
+          opacity: 0.7;
+        }
+      }
+      .label {
+        font-weight: 500;
+      }
+      .url {
+        flex: 1;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        font-size: 12px;
+        color: #a1a1aa;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .count {
+        font-family: ui-monospace, monospace;
+        color: #fafafa;
+        white-space: nowrap;
+      }
+      .count .ws {
+        color: #818cf8;
+      }
+      button {
+        background: #27272a;
+        color: #fafafa;
+        border: 1px solid #3f3f46;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #3f3f46;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <span class="badge" id="badge">REC</span>
+      <span class="label" id="label">recording</span>
+      <span class="url" id="url">—</span>
+      <span class="all" id="all" hidden>ALL</span>
+      <span class="elapsed" id="elapsed">00:00</span>
+      <span class="count"
+        ><span id="count">0</span> reqs · <span class="ws"><span id="wscount">0</span> ws</span></span
+      >
+      <button id="pause">Pause</button>
+      <button id="stop">Stop &amp; save</button>
+    </div>
+    <script>
+      const params = new URLSearchParams(window.location.search)
+      document.getElementById('label').textContent = params.get('label') || 'recording'
+      if (params.get('all')) document.getElementById('all').hidden = false
+      window.__recorderSetUrl = (u) => {
+        document.getElementById('url').textContent = u
+      }
+      window.__recorderSetCount = (n, ws) => {
+        document.getElementById('count').textContent = String(n)
+        if (typeof ws === 'number') document.getElementById('wscount').textContent = String(ws)
+      }
+
+      // Elapsed time — counts only while actively recording (frozen while paused).
+      let elapsedMs = 0
+      let running = false
+      let lastTick = Date.now()
+      const fmt = (ms) => {
+        const total = Math.floor(ms / 1000)
+        const h = Math.floor(total / 3600)
+        const mm = String(Math.floor((total % 3600) / 60)).padStart(2, '0')
+        const ss = String(total % 60).padStart(2, '0')
+        return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
+      }
+      setInterval(() => {
+        const now = Date.now()
+        if (running) elapsedMs += now - lastTick
+        lastTick = now
+        document.getElementById('elapsed').textContent = fmt(elapsedMs)
+      }, 250)
+
+      window.__recorderSetPaused = (p) => {
+        const badge = document.getElementById('badge')
+        badge.textContent = p ? 'PAUSED' : 'REC'
+        badge.classList.toggle('paused', p)
+        document.getElementById('pause').textContent = p ? 'Resume' : 'Pause'
+        running = !p
+        lastTick = Date.now()
+      }
+      document.getElementById('pause').addEventListener('click', () => window.recorderToolbar.togglePause())
+      document.getElementById('stop').addEventListener('click', () => window.recorderToolbar.stop())
+    </script>
+  </body>
+</html>

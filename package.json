@@ -1,0 +1,87 @@
+{
+  "name": "decoy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Decoy — the master browser-session recorder. Faithfully captures every request/response, cookie, storage, WebSocket frame and screenshot across pages, popups, iframes and workers, so downstream modules can replay/extract without reimplementing capture.",
+  "author": "Yann Allard",
+  "type": "module",
+  "main": "electron.mjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "electron": "cross-env NODE_ENV=production electron .",
+    "electron:dev": "cross-env NODE_ENV=development electron .",
+    "dist": "pnpm run build && electron-builder",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:lint": "oxlint -c .oxlintrc.json",
+    "fix:lint": "oxlint -c .oxlintrc.json --fix",
+    "check:format": "oxfmt --check .",
+    "fix:format": "oxfmt --write .",
+    "check": "pnpm check:lint && pnpm check:format",
+    "fix": "pnpm fix:lint && pnpm fix:format",
+    "lint": "pnpm check:lint",
+    "icon": "node scripts/make-icon.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@oxfmt/binding-win32-x64-msvc": "0.47.0",
+    "@oxlint/binding-win32-x64-msvc": "1.67.0",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "cross-env": "^7.0.3",
+    "electron": "^38.4.0",
+    "electron-builder": "^25.1.8",
+    "oxfmt": "^0.47.0",
+    "oxlint": "^1.0.0",
+    "typescript": "~5.6.3",
+    "vite": "^6.0.3",
+    "vitest": "^2.1.8"
+  },
+  "packageManager": "pnpm@10.12.4",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "build": {
+    "appId": "com.decoy.app",
+    "productName": "Decoy",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron.mjs",
+      "preload.cjs",
+      "popup-preload.cjs",
+      "src/main/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png"
+    }
+  }
+}

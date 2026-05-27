@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+*.log
+.DS_Store
+.vite/
+
+# Decoy never commits recordings. The default sessions root lives outside the
+# repo (Documents/Decoy/sessions), but ignore a local ./sessions too in case a
+# user points the configurable root back into the project during development.
+sessions/
+.sessions/
