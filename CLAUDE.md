@@ -68,7 +68,7 @@ into the main bundle via `?raw`.
 ## Output schema (`src/main/recording/types.ts`) — additive-only
 
 A run is `<sessionsRoot>/<runId>/` (`runId` = `YYYY-MM-DD_HHhMM_<label-slug>`):
-`CLAUDE.md` (the agent reading guide — copied from `session-guide.md`; **not** this file),
+`AGENTS.md` (the agent reading guide — copied from `session-guide.md`; **not** this file),
 `summary.md`, `manifest.json`, `network.jsonl` (index + pause/resume markers),
 `navigation.jsonl`, `session.har`, `cookies.json`, `storage.json`, `requests/`, `websockets/`,
 `screenshots/`.
