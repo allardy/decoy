@@ -218,7 +218,15 @@ export async function createRecorderWindow(opts: CreateRecorderOptions): Promise
   const toolbarQuery = `?label=${encodeURIComponent(opts.label)}${opts.captureAll ? '&all=1' : ''}`
 
   await toolbar.webContents.loadURL(`${opts.toolbarUrl}${toolbarQuery}`)
-  await site.webContents.loadURL(opts.startUrl)
+  // SPA signin pages (and meta-refresh / location.replace patterns) often initiate a second
+  // navigation before the first one resolves; Chromium then rejects the original loadURL with
+  // ERR_ABORTED even though the page is rendering. The recorder is already attached, so capture
+  // is unaffected — just don't surface that as a "start failed" error to the panel.
+  await site.webContents.loadURL(opts.startUrl).catch((err) => {
+    if (!String(err?.message ?? err).includes('ERR_ABORTED')) {
+      throw err
+    }
+  })
 
   applyPaused() // sync the toolbar badge with the initial paused state
 
