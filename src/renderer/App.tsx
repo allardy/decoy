@@ -12,6 +12,26 @@ import {
 import { FiltersModal } from './FiltersModal'
 import { ProfilesModal } from './ProfilesModal'
 
+// Accept a bare host ("airbnb.com") by defaulting the scheme to https://. Returns the normalized URL,
+// or null only when there's genuinely nothing to open (empty, or a host that can't be a real site).
+function normalizeStartUrl(raw: string): string | null {
+  const trimmed = raw.trim()
+
+  if (!trimmed || trimmed === 'https://' || trimmed === 'http://') {
+    return null
+  }
+
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+
+  try {
+    const { hostname } = new URL(withScheme)
+
+    return hostname.includes('.') || hostname === 'localhost' ? withScheme : null
+  } catch {
+    return null
+  }
+}
+
 function formatWhen(iso: string): string {
   const d = new Date(iso)
 
@@ -109,14 +129,15 @@ export function App() {
 
   const start = useCallback(async () => {
     setError(null)
-    const url = startUrl.trim()
+    const url = normalizeStartUrl(startUrl)
 
-    if (!url || url === 'https://' || !/^https?:\/\/.+/i.test(url)) {
-      setError('Enter a start URL (https://…).')
+    if (!url) {
+      setError('Enter a URL to record (e.g. airbnb.com).')
 
       return
     }
 
+    setStartUrl(url)
     setBusy(true)
 
     try {
@@ -142,13 +163,15 @@ export function App() {
   // copies its cookies into the selected profile's partition, so a later recording is authenticated.
   const openLogin = useCallback(async () => {
     setError(null)
-    const url = startUrl.trim()
+    const url = normalizeStartUrl(startUrl)
 
-    if (!url || url === 'https://' || !/^https?:\/\/.+/i.test(url)) {
-      setError('Enter a URL (https://…) to open.')
+    if (!url) {
+      setError('Enter a URL to open (e.g. airbnb.com).')
 
       return
     }
+
+    setStartUrl(url)
 
     try {
       await decoy.openLogin({ startUrl: url, profileId })
