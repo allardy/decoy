@@ -1,7 +1,15 @@
 import { app } from 'electron'
 import { join } from 'node:path'
 
-import { pushHistory, readConfig, writeConfig, type DecoyConfig } from './config-core.js'
+import {
+  addProfile,
+  pushHistory,
+  readConfig,
+  removeProfile,
+  setProfileChromeLogin,
+  writeConfig,
+  type DecoyConfig,
+} from './config-core.js'
 import { defaultFilters } from './recording/filters.js'
 import type { FilterConfig } from './recording/types.js'
 
@@ -66,4 +74,39 @@ export async function resetFilters(): Promise<DecoyConfig> {
   const cur = await load()
 
   return persist({ ...cur, filters: defaultFilters() })
+}
+
+/** Create a custom profile and select it. Throws on an empty/reserved name. */
+export async function createProfile(label: string, chromeLogin = false): Promise<{ config: DecoyConfig; id: string }> {
+  const cur = await load()
+  const { profiles, id } = addProfile(cur.profiles, label, chromeLogin)
+  const config = await persist({ ...cur, profiles, lastProfileId: id })
+
+  return { config, id }
+}
+
+/** Toggle a profile's chrome-login flag. `id === 'default'` targets the built-in Default profile. */
+export async function setChromeLogin(id: string, value: boolean): Promise<DecoyConfig> {
+  const cur = await load()
+
+  if (id === 'default') {
+    return persist({ ...cur, defaultChromeLogin: value })
+  }
+
+  return persist({ ...cur, profiles: setProfileChromeLogin(cur.profiles, id, value) })
+}
+
+/** Remove a custom profile; if it was the remembered selection, fall back to Default. */
+export async function deleteProfile(id: string): Promise<DecoyConfig> {
+  const cur = await load()
+  const lastProfileId = cur.lastProfileId === id ? 'default' : cur.lastProfileId
+
+  return persist({ ...cur, profiles: removeProfile(cur.profiles, id), lastProfileId })
+}
+
+/** Remember the last-selected profile so it pre-selects next launch. */
+export async function setLastProfileId(id: string): Promise<DecoyConfig> {
+  const cur = await load()
+
+  return persist({ ...cur, lastProfileId: id })
 }

@@ -8,7 +8,9 @@ import { ensureRunDir, ensureSessionsRoot } from './storage.js'
 import type { FilterConfig } from './types.js'
 
 const TOOLBAR_HEIGHT = 56
-const REUSE_PARTITION = 'persist:decoy'
+
+/** The "Default" profile's persistent partition — preserves logins made before profiles existed. */
+export const REUSE_PARTITION = 'persist:decoy'
 
 export interface RecordingHandle {
   runId: string
@@ -24,7 +26,8 @@ export interface RecordingHandle {
 export interface CreateRecorderOptions {
   label: string
   startUrl: string
-  reuseSession: boolean
+  /** Persistent session partition to record in; undefined = a fresh, throwaway per-run session. */
+  partition?: string
   captureAll: boolean
   filters: FilterConfig
   autoRecord: boolean
@@ -67,7 +70,7 @@ export async function createRecorderWindow(opts: CreateRecorderOptions): Promise
   const runId = formatRunId(new Date(), opts.label)
   const runDir = await ensureRunDir(opts.sessionsRoot, runId)
 
-  const partition = opts.reuseSession ? REUSE_PARTITION : `recording-${runId}`
+  const partition = opts.partition ?? `recording-${runId}`
   const ses = session.fromPartition(partition)
 
   ses.setUserAgent(opts.userAgent)

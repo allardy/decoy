@@ -31,11 +31,11 @@ Non-goals (YAGNI): renaming profiles, per-profile filters/settings, importing co
 A **profile** is a named persistent Electron session partition. A start-form selection is one of
 three kinds:
 
-| Selection                      | Partition                | Persists? | Notes                                  |
-| ------------------------------ | ------------------------ | --------- | -------------------------------------- |
-| **Fresh session (no profile)** | `recording-<runId>`      | No        | Reproduces the old "Reuse session OFF" |
-| **Default**                    | `persist:decoy`          | Yes       | The current shared session, untouched  |
-| **Custom** (e.g. "Work")       | `persist:decoy-<slug>`   | Yes       | Isolated cookies/storage per profile   |
+| Selection                      | Partition              | Persists? | Notes                                  |
+| ------------------------------ | ---------------------- | --------- | -------------------------------------- |
+| **Fresh session (no profile)** | `recording-<runId>`    | No        | Reproduces the old "Reuse session OFF" |
+| **Default**                    | `persist:decoy`        | Yes       | The current shared session, untouched  |
+| **Custom** (e.g. "Work")       | `persist:decoy-<slug>` | Yes       | Isolated cookies/storage per profile   |
 
 - **Default** is implicit (not stored in the profiles list), undeletable, and always points at the
   existing `persist:decoy` constant so current logins are preserved.
@@ -90,11 +90,11 @@ Replace `StartPayload.reuseSession: boolean` with `profileId: string`.
 
 New IPC handlers (registered in `index.ts`, exposed via `preload/index.ts`, typed in `bridge.ts`):
 
-| Channel                   | Args            | Returns                | Behavior                                                                 |
-| ------------------------- | --------------- | ---------------------- | ------------------------------------------------------------------------ |
-| `profiles:create`         | `label: string` | updated `DecoyConfig`  | `addProfile` + persist; sets `lastProfileId` to the new id.              |
-| `profiles:delete`         | `id: string`    | updated `DecoyConfig`  | Block if it's the active recording's profile (throw). `removeProfile` + persist + `session.fromPartition(`persist:decoy-${id}`).clearStorageData()`. If it was `lastProfileId`, reset to `"default"`. |
-| `recording:copy-path`     | `runId: string` | `{ path: string }`     | Validate `runId` (same guard as `open-folder`). `clipboard.writeText(join(sessionsRoot, runId))`. |
+| Channel               | Args            | Returns               | Behavior                                                                                                                                                                                              |
+| --------------------- | --------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `profiles:create`     | `label: string` | updated `DecoyConfig` | `addProfile` + persist; sets `lastProfileId` to the new id.                                                                                                                                           |
+| `profiles:delete`     | `id: string`    | updated `DecoyConfig` | Block if it's the active recording's profile (throw). `removeProfile` + persist + `session.fromPartition(`persist:decoy-${id}`).clearStorageData()`. If it was `lastProfileId`, reset to `"default"`. |
+| `recording:copy-path` | `runId: string` | `{ path: string }`    | Validate `runId` (same guard as `open-folder`). `clipboard.writeText(join(sessionsRoot, runId))`.                                                                                                     |
 
 Profiles are read through the existing `config:get` (which now includes `profiles`/`lastProfileId`),
 so no separate list endpoint is needed. `lastProfileId` is persisted on recording start (alongside

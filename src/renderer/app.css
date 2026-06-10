@@ -148,6 +148,25 @@ body {
   cursor: pointer;
 }
 
+.profile-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.profile-pick select {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #27272a;
+  color: var(--fg);
+  cursor: pointer;
+}
+
 /* --- buttons --- */
 button {
   font: inherit;
