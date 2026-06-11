@@ -33,6 +33,22 @@ A `{"marker":"resume"}` line in `network.jsonl` marks where the user resumed cap
 pausing to click around — **the requests after a `resume` are usually the deliberate action**,
 the ones before are exploratory noise.
 
+## Filenames are slugified — never read endpoint names or params from them
+
+`requests/NNNN_METHOD_host_path[_operation].json` filenames are a lossy slug for
+human scanning, NOT the real request. The slugifier collapses characters, so the
+filename can misrepresent the actual URL:
+
+- `_` and `=`/`&`/`?` in the path or query all become `-`. So a file named
+  `..._net-usage-group-0-period-3-product-actions-sku-query.json` is really
+  `GET .../net_usage?group=0&period=3&product=actions&sku=&query=` — note the
+  endpoint is `net_usage` (underscore, not `net-usage`) and the trailing
+  `sku-query` is two EMPTY params `sku=&query=`, not `sku=query`.
+
+**Always open the JSON and copy `request.url` verbatim** for the path + query
+string. Treat the filename only as an index to find the file. The `summary.md`
+endpoint list is also authoritative (it prints the real path); the filename is not.
+
 ## Finding the right request
 
 - Grep `network.jsonl` for a path fragment, or grep `requests/*.json` for a value you saw in
@@ -99,6 +115,36 @@ If a request has no obvious `authorization` header, the auth is somewhere else �
 
 Tokens and cookies in a recording are **point-in-time and will expire**. Treat them as proof
 of the auth _mechanism_, not as durable credentials.
+
+### Is it cookie auth or token auth? (and is the session even logged in?)
+
+This matters because a **cookie-only** session can be reproduced by carrying cookies alone, while
+**non-cookie auth cannot**. Pick any authenticated `XHR`/`Fetch` and check what carries the identity:
+
+- **Cookie session** — `request.wireHeaders.cookie` holds a session id (`sid`, `_session`,
+  `__Secure-*session*`, …) and there is **no `authorization` header**. The cookie alone reproduces
+  the call.
+- **Token / non-cookie auth** — requests carry `authorization: Bearer <jwt>` or a custom `x-*-token`
+  header, and that value is **absent from every cookie**. It lives in `storage.json`
+  (`localStorage`/`sessionStorage`). Cookies alone will NOT reproduce these — you must replay the
+  storage token, and watch for a `/refresh`/`/token` call that re-mints it.
+- **Mixed** — a cookie gates an HTML or `/refresh` call that hands the SPA a short-lived bearer. Find
+  that call in `network.jsonl`; its `response` (body or `setCookieHeaders`) seeds the bearer used
+  everywhere else.
+
+**Quick heuristic:** `storage.json` has `*token*` / `id_token` / `oidc.user:*` keys → assume token
+auth. Only a session cookie and no such keys → cookie auth.
+
+**Is the captured session actually authenticated?** A recording can capture a _logged-out_ or expired
+session — don't mistake it for an auth example. Tell-tale signs:
+
+- `401`/`403` on API calls, or `3xx` redirects to `/login`, `/signin`, or `accounts.google.com`.
+- The first `Document` response / navigation screenshot is a sign-in page, not the app.
+- `storage.json` empty **and** no session cookie present.
+
+If the auth is token-based or rides on **session-only cookies** (no expiry — they vanish when the
+browser closes), a cookie-only session copy is insufficient; that's your signal the login must carry
+the storage token or be re-done live.
 
 ## Special cases
 

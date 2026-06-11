@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 // Keep the surface small and serializable. (Typed view lives in renderer/bridge.ts.)
 contextBridge.exposeInMainWorld('decoy', {
   startRecording: (payload: unknown) => ipcRenderer.invoke('recording:start', payload),
+  openLogin: (payload: unknown) => ipcRenderer.invoke('login:open', payload),
   stopRecording: () => ipcRenderer.invoke('recording:stop'),
   getActiveRecording: () => ipcRenderer.invoke('recording:active'),
   listRecordings: () => ipcRenderer.invoke('recording:list'),
@@ -11,6 +12,12 @@ contextBridge.exposeInMainWorld('decoy', {
   confirmDelete: (label: string) => ipcRenderer.invoke('recording:confirm-delete', label),
   deleteRecording: (runId: string) => ipcRenderer.invoke('recording:delete', runId),
   renameRecording: (runId: string, name: string) => ipcRenderer.invoke('recording:rename', runId, name),
+  copyRecordingPath: (runId: string) => ipcRenderer.invoke('recording:copy-path', runId),
+
+  createProfile: (label: string, chromeLogin: boolean) => ipcRenderer.invoke('profiles:create', { label, chromeLogin }),
+  setProfileChromeLogin: (id: string, value: boolean) => ipcRenderer.invoke('profiles:set-chrome-login', id, value),
+  deleteProfile: (id: string) => ipcRenderer.invoke('profiles:delete', id),
+  confirmDeleteProfile: (label: string) => ipcRenderer.invoke('profiles:confirm-delete', label),
 
   getConfig: () => ipcRenderer.invoke('config:get'),
   setSessionsRoot: (root: string) => ipcRenderer.invoke('config:set-sessions-root', root),

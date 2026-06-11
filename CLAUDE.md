@@ -53,6 +53,37 @@ loaded via `loadFile`, and the whole app is plain JS in `out/` — the asar carr
 node_modules and nothing is transpiled or spawned at runtime. `session-guide.md` is inlined
 into the main bundle via `?raw`.
 
+## Profiles & login
+
+A **profile** is the persistent Electron session partition a recording runs in
+(`src/main/config-core.ts`): `Default` (`persist:decoy`), a custom one (`persist:decoy-<id>`), or
+`Fresh` (a throwaway per-run partition). The start-form selector + `ProfilesModal` manage them.
+
+**Chrome-login escape hatch** (`src/main/chrome-login.ts`): Google (and similar) reject sign-in both
+inside the embedded `WebContentsView` **and** on any Chrome with a remote-debugging port open ("this
+browser or app may not be secure") — spoofing the UA doesn't help; the debug surface is the tell. So
+a profile can set **`chromeLogin: true`** (per-profile toggle in `ProfilesModal`; `defaultChromeLogin`
+for the built-in Default). Login then happens in the user's **real Chrome** against a persistent,
+per-profile `--user-data-dir` at `userData/chrome-login/<partition-slug>`, in two passes:
+
+1. **Login** — Chrome launches with **no** debug port (Google allows the sign-in); the user signs in
+   by hand (incl. MFA / security key).
+2. **Harvest** — when they close that window, the same profile relaunches **headless with** a debug
+   port (it opens `about:blank`, never a Google page, so the block doesn't fire) and mirrors its
+   cookies into the Electron partition via CDP `Storage.getCookies`.
+
+Recording itself **always happens in the webview** — Chrome is only the auth escape hatch. The
+`Log in (Chrome)` button shows only when the selected profile is chrome-login; re-selecting the
+profile reopens the same already-logged-in Chrome dir (re-auth on demand). `recording:start` blocks a
+chrome-login profile that has never been logged in.
+
+**Caveat:** only **persistent** cookies survive the harvest — Chrome doesn't persist session-only
+cookies, and `localStorage`/token auth isn't carried at all. Fine for cookie-session sites (e.g.
+Airbnb); insufficient for token-auth sites. The recording's own `AGENTS.md`
+(`session-guide.md` → "Is it cookie auth or token auth?") documents how to detect which a target
+uses. The full fix for token-auth targets is to attach the recorder to the real Chrome instead of the
+webview — a recorder-transport rewrite, not yet done.
+
 ## Conventions (enforced — see `.oxlintrc.json` / `.oxfmtrc.json`)
 
 - **No semicolons, single quotes, printWidth 120, sorted imports** (oxfmt). Run `pnpm fix`.

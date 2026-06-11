@@ -24,10 +24,20 @@ export interface FilterConfig {
   blockHosts: string[]
 }
 
+export interface Profile {
+  id: string
+  label: string
+  /** When true, this profile signs in via real external Chrome (Google escape hatch); see main. */
+  chromeLogin?: boolean
+}
+
 export interface DecoyConfig {
   sessionsRoot: string
   urlHistory: string[]
   filters: FilterConfig
+  profiles: Profile[]
+  lastProfileId: string
+  defaultChromeLogin: boolean
 }
 
 // CDP resourceType values worth offering as checkboxes in the filter modal.
@@ -52,14 +62,21 @@ export const KNOWN_RESOURCE_TYPES = [
 export interface StartPayload {
   label: string
   startUrl: string
-  reuseSession: boolean
+  /** Profile selection: "fresh" | "default" | a custom profile id. */
+  profileId: string
   captureAll: boolean
   autoRecord: boolean
   exportHar: boolean
 }
 
+export interface OpenLoginPayload {
+  startUrl: string
+  profileId: string
+}
+
 export interface DecoyBridge {
   startRecording(p: StartPayload): Promise<{ runId: string }>
+  openLogin(p: OpenLoginPayload): Promise<{ success: boolean }>
   stopRecording(): Promise<{ success: boolean }>
   getActiveRecording(): Promise<ActiveRecording | null>
   listRecordings(): Promise<RecordingSummary[]>
@@ -67,6 +84,11 @@ export interface DecoyBridge {
   confirmDelete(label: string): Promise<{ confirmed: boolean }>
   deleteRecording(runId: string): Promise<{ success: boolean }>
   renameRecording(runId: string, name: string): Promise<{ runId: string; label: string }>
+  copyRecordingPath(runId: string): Promise<{ path: string }>
+  createProfile(label: string, chromeLogin: boolean): Promise<DecoyConfig>
+  setProfileChromeLogin(id: string, value: boolean): Promise<DecoyConfig>
+  deleteProfile(id: string): Promise<DecoyConfig>
+  confirmDeleteProfile(label: string): Promise<{ confirmed: boolean }>
   getConfig(): Promise<DecoyConfig>
   setSessionsRoot(root: string): Promise<DecoyConfig>
   pickSessionsRoot(): Promise<{ canceled: boolean; path?: string }>

@@ -1,19 +1,61 @@
-import { app, BaseWindow, BrowserWindow, dialog, ipcMain, Menu, session, shell, type WebContents } from 'electron'
+import {
+  app,
+  BaseWindow,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  session,
+  shell,
+  type WebContents,
+} from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { hasChromeSession, launchLoginChrome, removeChromeSession } from './chrome-login.js'
+import type { DecoyConfig, Profile } from './config-core.js'
 import {
   addUrlToHistory,
   clearUrlHistory,
+  createProfile,
+  deleteProfile,
   getConfig,
   getFilters,
   getSessionsRoot,
   resetFilters,
+  setChromeLogin,
   setFilters,
+  setLastProfileId,
   setSessionsRoot,
 } from './config.js'
 import { deleteRecording, listRecordings, renameRecording } from './recording/storage.js'
-import { createRecorderWindow, type RecordingHandle } from './recording/window.js'
+import { createRecorderWindow, REUSE_PARTITION, type RecordingHandle } from './recording/window.js'
+
+// Map a profile selection to its session partition. "fresh" → undefined (a throwaway per-run
+// session); "default" → the legacy shared partition; a known custom id → its own partition.
+// An unknown id falls back to Default rather than silently spinning up an orphan session.
+function resolvePartition(profileId: string, profiles: Profile[]): string | undefined {
+  if (profileId === 'fresh') {
+    return undefined
+  }
+
+  if (profileId === 'default') {
+    return REUSE_PARTITION
+  }
+
+  return profiles.some((p) => p.id === profileId) ? `persist:decoy-${profileId}` : REUSE_PARTITION
+}
+
+// Does this profile selection sign in via the real-Chrome escape hatch? "fresh" never does (a
+// throwaway session can't carry a login); "default" reads the config flag; custom reads its profile.
+function isChromeLogin(profileId: string, cfg: DecoyConfig): boolean {
+  if (profileId === 'default') {
+    return cfg.defaultChromeLogin
+  }
+
+  return cfg.profiles.some((p) => p.id === profileId && p.chromeLogin === true)
+}
 
 // In dev, electron-vite serves the renderer on an ephemeral port and sets this. In a packaged
 // build it is undefined and the renderer is loaded from disk via loadFile().
@@ -159,11 +201,22 @@ ipcMain.handle('recording:start', async (_event, payload) => {
 
     await addUrlToHistory(startUrl)
     const filters = await getFilters()
+    const cfg = await getConfig()
+    const profileId = String(payload.profileId ?? cfg.lastProfileId ?? 'default')
+    const partition = resolvePartition(profileId, cfg.profiles)
+
+    // A chrome-login profile must be signed in first — its cookies are mirrored from real Chrome,
+    // and recording in the webview before that just lands a logged-out session.
+    if (partition && isChromeLogin(profileId, cfg) && !hasChromeSession(partition)) {
+      throw new Error('This profile signs in with real Chrome — click "Log in (Chrome)" and sign in first.')
+    }
+
+    await setLastProfileId(profileId)
 
     const handle = await createRecorderWindow({
       label,
       startUrl,
-      reuseSession: payload.reuseSession !== false,
+      partition,
       captureAll: Boolean(payload.captureAll),
       filters,
       autoRecord: payload.autoRecord ?? true,
@@ -188,6 +241,26 @@ ipcMain.handle('recording:start', async (_event, payload) => {
   }
 })
 
+// EXPERIMENT: sign in via the user's REAL Chrome over CDP, then mirror the cookies into the selected
+// profile's partition (see chrome-login.ts). Google's BotGuard flags Chromium-embedded sign-in no
+// matter how we spoof it, so we don't sign in inside Electron at all — real Chrome logs in, we copy
+// the session, a later recording in that profile is already authenticated.
+ipcMain.handle('login:open', async (_event, payload) => {
+  const startUrl = String(payload?.startUrl ?? '')
+  const cfg = await getConfig()
+  const profileId = String(payload?.profileId ?? cfg.lastProfileId ?? 'default')
+  const partition = resolvePartition(profileId, cfg.profiles)
+
+  await setLastProfileId(profileId)
+  const result = launchLoginChrome({ startUrl, partition })
+
+  if (!result.ok) {
+    throw new Error(result.error ?? 'Failed to launch Chrome')
+  }
+
+  return { success: true }
+})
+
 ipcMain.handle('recording:list', async () => {
   return listRecordings(await getSessionsRoot())
 })
@@ -206,6 +279,49 @@ ipcMain.handle('recording:delete', async (_event, runId) => {
   await deleteRecording(await getSessionsRoot(), runId)
 
   return { success: true }
+})
+
+// Copy a recording's absolute folder path to the clipboard (saves opening + copying from Explorer).
+ipcMain.handle('recording:copy-path', async (_event, runId) => {
+  if (typeof runId !== 'string' || runId.includes('/') || runId.includes('\\') || runId.includes('..')) {
+    throw new Error('invalid runId')
+  }
+
+  const path = join(await getSessionsRoot(), runId)
+
+  clipboard.writeText(path)
+
+  return { path }
+})
+
+ipcMain.handle('profiles:create', async (_event, payload) => {
+  const label = String((payload as { label?: unknown })?.label ?? '')
+  const chromeLogin = (payload as { chromeLogin?: unknown })?.chromeLogin === true
+  const { config } = await createProfile(label, chromeLogin)
+
+  return config
+})
+
+// Toggle a profile's chrome-login flag. id === "default" targets the built-in Default profile.
+ipcMain.handle('profiles:set-chrome-login', async (_event, id, value) => {
+  return setChromeLogin(String(id ?? ''), value === true)
+})
+
+// Delete a custom profile and wipe its session data. Blocked while that profile is mid-recording.
+ipcMain.handle('profiles:delete', async (_event, id) => {
+  const profileId = String(id ?? '')
+  const partition = `persist:decoy-${profileId}`
+
+  if (activeRecording && activeRecording.partition === partition) {
+    throw new Error('That profile is in use by the active recording — stop it first.')
+  }
+
+  const config = await deleteProfile(profileId)
+
+  await session.fromPartition(partition).clearStorageData()
+  removeChromeSession(partition)
+
+  return config
 })
 
 ipcMain.handle('recording:rename', async (_event, runId, name) => {
@@ -250,6 +366,24 @@ ipcMain.handle('recording:confirm-delete', async (_event, label) => {
     title: 'Delete recording',
     message: `Delete “${String(label ?? 'this recording')}”?`,
     detail: 'This permanently removes the run folder and everything in it. This cannot be undone.',
+  }
+  const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts)
+
+  return { confirmed: response === 1 }
+})
+
+// Confirm deleting a profile — it wipes that session's cookies/logins, so warn before the renderer
+// calls profiles:delete.
+ipcMain.handle('profiles:confirm-delete', async (_event, label) => {
+  const parent = mainWindow instanceof BaseWindow ? mainWindow : undefined
+  const opts = {
+    type: 'warning' as const,
+    buttons: ['Cancel', 'Delete'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Delete profile',
+    message: `Delete the “${String(label ?? 'this profile')}” profile?`,
+    detail: 'This signs out and clears all cookies and stored data for this profile. This cannot be undone.',
   }
   const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts)
 

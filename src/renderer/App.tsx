@@ -1,7 +1,36 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { type ActiveRecording, decoy, type FilterConfig, type RecordingProgress, type RecordingSummary } from './bridge'
+import {
+  type ActiveRecording,
+  decoy,
+  type DecoyConfig,
+  type FilterConfig,
+  type Profile,
+  type RecordingProgress,
+  type RecordingSummary,
+} from './bridge'
 import { FiltersModal } from './FiltersModal'
+import { ProfilesModal } from './ProfilesModal'
+
+// Accept a bare host ("airbnb.com") by defaulting the scheme to https://. Returns the normalized URL,
+// or null only when there's genuinely nothing to open (empty, or a host that can't be a real site).
+function normalizeStartUrl(raw: string): string | null {
+  const trimmed = raw.trim()
+
+  if (!trimmed || trimmed === 'https://' || trimmed === 'http://') {
+    return null
+  }
+
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+
+  try {
+    const { hostname } = new URL(withScheme)
+
+    return hostname.includes('.') || hostname === 'localhost' ? withScheme : null
+  } catch {
+    return null
+  }
+}
 
 function formatWhen(iso: string): string {
   const d = new Date(iso)
@@ -37,7 +66,11 @@ export function App() {
   const [recordings, setRecordings] = useState<RecordingSummary[]>([])
   const [label, setLabel] = useState('')
   const [startUrl, setStartUrl] = useState('https://')
-  const [reuseSession, setReuseSession] = useState(true)
+  const [profileId, setProfileId] = useState('default')
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [defaultChromeLogin, setDefaultChromeLogin] = useState(false)
+  const [profilesOpen, setProfilesOpen] = useState(false)
+  const [copiedRunId, setCopiedRunId] = useState<string | null>(null)
   const [captureAll, setCaptureAll] = useState(false)
   const [autoRecord, setAutoRecord] = useState(true)
   const [exportHar, setExportHar] = useState(true)
@@ -59,6 +92,9 @@ export function App() {
     setSessionsRoot(c.sessionsRoot)
     setUrlHistory(c.urlHistory ?? [])
     setFilters(c.filters)
+    setProfiles(c.profiles ?? [])
+    setProfileId(c.lastProfileId ?? 'default')
+    setDefaultChromeLogin(c.defaultChromeLogin ?? false)
   }, [])
 
   const refresh = useCallback(async () => {
@@ -93,21 +129,22 @@ export function App() {
 
   const start = useCallback(async () => {
     setError(null)
-    const url = startUrl.trim()
+    const url = normalizeStartUrl(startUrl)
 
-    if (!url || url === 'https://' || !/^https?:\/\/.+/i.test(url)) {
-      setError('Enter a start URL (https://…).')
+    if (!url) {
+      setError('Enter a URL to record (e.g. airbnb.com).')
 
       return
     }
 
+    setStartUrl(url)
     setBusy(true)
 
     try {
       await decoy.startRecording({
         label: label.trim(),
         startUrl: url,
-        reuseSession,
+        profileId,
         captureAll,
         autoRecord,
         exportHar,
@@ -119,7 +156,29 @@ export function App() {
     } finally {
       setBusy(false)
     }
-  }, [label, startUrl, reuseSession, captureAll, autoRecord, exportHar, loadConfig])
+  }, [label, startUrl, profileId, captureAll, autoRecord, exportHar, loadConfig])
+
+  // Launch the user's REAL Chrome to sign in (Google blocks sign-in on any Chrome with a debugging
+  // port open, so login runs debugging-OFF). When the user closes that window, a headless pass
+  // copies its cookies into the selected profile's partition, so a later recording is authenticated.
+  const openLogin = useCallback(async () => {
+    setError(null)
+    const url = normalizeStartUrl(startUrl)
+
+    if (!url) {
+      setError('Enter a URL to open (e.g. airbnb.com).')
+
+      return
+    }
+
+    setStartUrl(url)
+
+    try {
+      await decoy.openLogin({ startUrl: url, profileId })
+    } catch (e) {
+      setError(String(e))
+    }
+  }, [startUrl, profileId])
 
   const stop = useCallback(() => {
     void decoy.stopRecording()
@@ -142,6 +201,27 @@ export function App() {
     },
     [refresh],
   )
+
+  const copyPath = useCallback(async (runId: string) => {
+    try {
+      await decoy.copyRecordingPath(runId)
+      setCopiedRunId(runId)
+      setTimeout(() => setCopiedRunId((cur) => (cur === runId ? null : cur)), 1200)
+    } catch (e) {
+      setError(String(e))
+    }
+  }, [])
+
+  // The profiles modal hands back the updated config after each create/delete.
+  const onProfilesChanged = useCallback((cfg: DecoyConfig) => {
+    setProfiles(cfg.profiles)
+    setProfileId(cfg.lastProfileId)
+    setDefaultChromeLogin(cfg.defaultChromeLogin ?? false)
+  }, [])
+
+  // Whether the currently-selected profile signs in via real Chrome (controls the Log in button).
+  const selectedChromeLogin =
+    profileId === 'default' ? defaultChromeLogin : (profiles.find((p) => p.id === profileId)?.chromeLogin ?? false)
 
   const pickFolder = useCallback(async () => {
     const res = await decoy.pickSessionsRoot()
@@ -226,6 +306,16 @@ export function App() {
             onKeyDown={(e) => e.key === 'Enter' && void start()}
             disabled={busy}
           />
+          {selectedChromeLogin && (
+            <button
+              className="ghost"
+              onClick={() => void openLogin()}
+              disabled={busy}
+              title="Launch real Chrome to log in (gets past Google sign-in). Log in, then CLOSE the Chrome window — its cookies are copied into the selected profile. Then Record in that profile."
+            >
+              Log in (Chrome)
+            </button>
+          )}
           <button
             className="primary"
             onClick={() => void start()}
@@ -248,13 +338,21 @@ export function App() {
             <input type="checkbox" checked={autoRecord} onChange={(e) => setAutoRecord(e.target.checked)} />
             Auto-record
           </label>
-          <label
-            className="toggle"
-            title="Reuse the persistent browser profile so logins carry across recordings. Off = a fresh, isolated session each time."
-          >
-            <input type="checkbox" checked={reuseSession} onChange={(e) => setReuseSession(e.target.checked)} />
-            Reuse session
+          <label className="profile-pick" title="Which logged-in browser session to record in.">
+            Profile
+            <select value={profileId} onChange={(e) => setProfileId(e.target.value)} disabled={busy}>
+              <option value="fresh">Fresh session (no profile)</option>
+              <option value="default">Default</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
           </label>
+          <button className="ghost sm" onClick={() => setProfilesOpen(true)} disabled={busy}>
+            Manage…
+          </button>
           <label
             className="toggle"
             title="Ignore the capture filters for this run and record every request — images, fonts, scripts, and all."
@@ -310,6 +408,9 @@ export function App() {
                   <button className="ghost sm" onClick={() => void decoy.openRecording(r.runId)}>
                     Open folder
                   </button>
+                  <button className="ghost sm" onClick={() => void copyPath(r.runId)}>
+                    {copiedRunId === r.runId ? 'Copied' : 'Copy path'}
+                  </button>
                   <button className="danger sm" onClick={() => void remove(r)}>
                     Delete
                   </button>
@@ -357,6 +458,15 @@ export function App() {
 
       {filtersOpen && filters && (
         <FiltersModal initial={filters} onClose={() => setFiltersOpen(false)} onSaved={setFilters} />
+      )}
+
+      {profilesOpen && (
+        <ProfilesModal
+          profiles={profiles}
+          defaultChromeLogin={defaultChromeLogin}
+          onClose={() => setProfilesOpen(false)}
+          onChange={onProfilesChanged}
+        />
       )}
     </div>
   )
