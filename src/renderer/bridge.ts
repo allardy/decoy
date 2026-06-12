@@ -81,7 +81,6 @@ export interface DecoyBridge {
   getActiveRecording(): Promise<ActiveRecording | null>
   listRecordings(): Promise<RecordingSummary[]>
   openRecording(runId: string): Promise<{ success: boolean }>
-  confirmDelete(label: string): Promise<{ confirmed: boolean }>
   deleteRecording(runId: string): Promise<{ success: boolean }>
   renameRecording(runId: string, name: string): Promise<{ runId: string; label: string }>
   copyRecordingPath(runId: string): Promise<{ path: string }>

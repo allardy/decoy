@@ -9,8 +9,12 @@ import {
   type RecordingProgress,
   type RecordingSummary,
 } from './bridge'
+import { ConfirmModal } from './ConfirmModal'
 import { FiltersModal } from './FiltersModal'
 import { ProfilesModal } from './ProfilesModal'
+
+// How many recordings to show per page in the list.
+const PAGE_SIZE = 10
 
 // Accept a bare host ("airbnb.com") by defaulting the scheme to https://. Returns the normalized URL,
 // or null only when there's genuinely nothing to open (empty, or a host that can't be a real site).
@@ -83,6 +87,14 @@ export function App() {
   const [editingRunId, setEditingRunId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
 
+  const [tab, setTab] = useState<'recordings' | 'history'>('recordings')
+  const [filterText, setFilterText] = useState('')
+
+  const [page, setPage] = useState(0)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [pendingDelete, setPendingDelete] = useState<RecordingSummary[] | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
   const [filters, setFilters] = useState<FilterConfig | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
 
@@ -126,6 +138,42 @@ export function App() {
       offFinished()
     }
   }, [loadConfig, refresh])
+
+  // Drop selections for recordings that no longer exist (e.g. after a delete).
+  useEffect(() => {
+    setSelected((prev) => {
+      const live = new Set(recordings.map((r) => r.runId))
+      const next = new Set([...prev].filter((id) => live.has(id)))
+
+      return next.size === prev.size ? prev : next
+    })
+  }, [recordings])
+
+  // Reset to the first page whenever the active tab or filter changes, so the visible slice can't
+  // point past the (now shorter) filtered list.
+  useEffect(() => {
+    setPage(0)
+  }, [tab, filterText])
+
+  // The filter field narrows whichever tab is active: recordings by label/host/runId, history by URL.
+  const query = filterText.trim().toLowerCase()
+  const filteredRecordings = query
+    ? recordings.filter((r) => `${r.label} ${r.host ?? ''} ${r.runId}`.toLowerCase().includes(query))
+    : recordings
+  const filteredHistory = query ? urlHistory.filter((u) => u.toLowerCase().includes(query)) : urlHistory
+
+  // Both tabs share the pager; the active tab's list drives the page count.
+  const activeCount = tab === 'recordings' ? filteredRecordings.length : filteredHistory.length
+  const pageCount = Math.max(1, Math.ceil(activeCount / PAGE_SIZE))
+  const pageStart = page * PAGE_SIZE
+  const visible = filteredRecordings.slice(pageStart, pageStart + PAGE_SIZE)
+  const visibleHistory = filteredHistory.slice(pageStart, pageStart + PAGE_SIZE)
+  const allVisibleSelected = visible.length > 0 && visible.every((r) => selected.has(r.runId))
+
+  // Clamp the page if the active list shrinks under us (delete, filter, tab switch).
+  useEffect(() => {
+    setPage((p) => Math.min(p, pageCount - 1))
+  }, [pageCount])
 
   const start = useCallback(async () => {
     setError(null)
@@ -184,23 +232,69 @@ export function App() {
     void decoy.stopRecording()
   }, [])
 
-  const remove = useCallback(
-    async (r: RecordingSummary) => {
-      const { confirmed } = await decoy.confirmDelete(r.label)
+  const toggleSelect = useCallback((runId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
 
-      if (!confirmed) {
-        return
+      if (next.has(runId)) {
+        next.delete(runId)
+      } else {
+        next.add(runId)
       }
 
-      try {
+      return next
+    })
+  }, [])
+
+  const toggleSelectAll = useCallback(() => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      const ids = visible.map((r) => r.runId)
+
+      if (ids.every((id) => next.has(id))) {
+        for (const id of ids) {
+          next.delete(id)
+        }
+      } else {
+        for (const id of ids) {
+          next.add(id)
+        }
+      }
+
+      return next
+    })
+  }, [visible])
+
+  // Both single- and bulk-delete route through the in-app ConfirmModal: stage the targets, then
+  // confirmDelete() does the work.
+  const removeSelected = useCallback(() => {
+    const targets = recordings.filter((r) => selected.has(r.runId))
+
+    if (targets.length > 0) {
+      setPendingDelete(targets)
+    }
+  }, [recordings, selected])
+
+  const confirmDelete = useCallback(async () => {
+    if (!pendingDelete) {
+      return
+    }
+
+    setDeleting(true)
+
+    try {
+      for (const r of pendingDelete) {
         await decoy.deleteRecording(r.runId)
-        await refresh()
-      } catch (e) {
-        setError(String(e))
       }
-    },
-    [refresh],
-  )
+
+      setPendingDelete(null)
+      await refresh()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setDeleting(false)
+    }
+  }, [pendingDelete, refresh])
 
   const copyPath = useCallback(async (runId: string) => {
     try {
@@ -326,7 +420,7 @@ export function App() {
           </button>
         </div>
         <datalist id="url-history">
-          {urlHistory.map((u) => (
+          {urlHistory.slice(0, 10).map((u) => (
             <option key={u} value={u} />
           ))}
         </datalist>
@@ -369,55 +463,151 @@ export function App() {
 
       <section className="card">
         <div className="card-head">
-          <h2>Recordings {recordings.length > 0 && <span className="badge-count">{recordings.length}</span>}</h2>
-          <button className="ghost sm" onClick={() => void refresh()}>
-            Refresh
-          </button>
+          <div className="tabs" role="tablist">
+            <button
+              className={tab === 'recordings' ? 'tab active' : 'tab'}
+              role="tab"
+              aria-selected={tab === 'recordings'}
+              onClick={() => setTab('recordings')}
+            >
+              Recordings {recordings.length > 0 && <span className="badge-count">{recordings.length}</span>}
+            </button>
+            <button
+              className={tab === 'history' ? 'tab active' : 'tab'}
+              role="tab"
+              aria-selected={tab === 'history'}
+              onClick={() => setTab('history')}
+            >
+              History {urlHistory.length > 0 && <span className="badge-count">{urlHistory.length}</span>}
+            </button>
+          </div>
+          <div className="rec-head-actions">
+            <input
+              className="filter-input"
+              value={filterText}
+              placeholder={tab === 'recordings' ? 'Filter recordings…' : 'Filter URLs…'}
+              onChange={(e) => setFilterText(e.target.value)}
+            />
+            {tab === 'recordings' && selected.size > 0 && (
+              <button className="danger sm" onClick={removeSelected}>
+                Delete {selected.size} selected
+              </button>
+            )}
+            {tab === 'recordings' && (
+              <button className="ghost sm" onClick={() => void refresh()}>
+                Refresh
+              </button>
+            )}
+          </div>
         </div>
-        {recordings.length === 0 ? (
-          <p className="empty">No recordings yet.</p>
+        {tab === 'history' ? (
+          filteredHistory.length === 0 ? (
+            <p className="empty">{urlHistory.length === 0 ? 'No URL history yet.' : 'No URLs match your filter.'}</p>
+          ) : (
+            <>
+              <ul className="recordings">
+                {visibleHistory.map((u) => (
+                  <li key={u} title="Click to reuse this URL for a new recording">
+                    <button className="rec-label" onClick={() => setStartUrl(u)}>
+                      {u}
+                    </button>
+                    <span className="rec-actions">
+                      <button className="ghost sm" onClick={() => setStartUrl(u)}>
+                        Use
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {pageCount > 1 && (
+                <div className="rec-footer rec-footer-end">
+                  <div className="pager">
+                    <button className="ghost sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+                      ‹ Prev
+                    </button>
+                    <span className="pager-info">
+                      Page {page + 1} of {pageCount}
+                    </span>
+                    <button className="ghost sm" disabled={page >= pageCount - 1} onClick={() => setPage((p) => p + 1)}>
+                      Next ›
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        ) : filteredRecordings.length === 0 ? (
+          <p className="empty">{recordings.length === 0 ? 'No recordings yet.' : 'No recordings match your filter.'}</p>
         ) : (
-          <ul className="recordings">
-            {recordings.map((r) => (
-              <li key={r.runId} title={r.runId}>
-                {editingRunId === r.runId ? (
+          <>
+            <ul className="recordings">
+              {visible.map((r) => (
+                <li key={r.runId} title={r.runId} className={selected.has(r.runId) ? 'selected' : undefined}>
                   <input
-                    className="rec-edit"
-                    autoFocus
-                    value={editValue}
-                    placeholder="name (blank = domain)"
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => void commitEdit()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        void commitEdit()
-                      }
-
-                      if (e.key === 'Escape') {
-                        setEditingRunId(null)
-                      }
-                    }}
+                    type="checkbox"
+                    className="rec-check"
+                    checked={selected.has(r.runId)}
+                    onChange={() => toggleSelect(r.runId)}
+                    title="Select for bulk delete"
                   />
-                ) : (
-                  <button className="rec-label" onClick={() => beginEdit(r)} title="Click to rename">
-                    {r.label}
+                  {editingRunId === r.runId ? (
+                    <input
+                      className="rec-edit"
+                      autoFocus
+                      value={editValue}
+                      placeholder="name (blank = domain)"
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={() => void commitEdit()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          void commitEdit()
+                        }
+
+                        if (e.key === 'Escape') {
+                          setEditingRunId(null)
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button className="rec-label" onClick={() => beginEdit(r)} title="Click to rename">
+                      {r.label}
+                    </button>
+                  )}
+                  <span className="rec-meta">{recMeta(r)}</span>
+                  <span className="rec-actions">
+                    <button className="ghost sm" onClick={() => void decoy.openRecording(r.runId)}>
+                      Open folder
+                    </button>
+                    <button className="ghost sm" onClick={() => void copyPath(r.runId)}>
+                      {copiedRunId === r.runId ? 'Copied' : 'Copy path'}
+                    </button>
+                    <button className="danger sm" onClick={() => setPendingDelete([r])}>
+                      Delete
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="rec-footer">
+              <label className="toggle" title="Select / deselect every recording on this page.">
+                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} />
+                Select all on page
+              </label>
+              {pageCount > 1 && (
+                <div className="pager">
+                  <button className="ghost sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+                    ‹ Prev
                   </button>
-                )}
-                <span className="rec-meta">{recMeta(r)}</span>
-                <span className="rec-actions">
-                  <button className="ghost sm" onClick={() => void decoy.openRecording(r.runId)}>
-                    Open folder
+                  <span className="pager-info">
+                    Page {page + 1} of {pageCount}
+                  </span>
+                  <button className="ghost sm" disabled={page >= pageCount - 1} onClick={() => setPage((p) => p + 1)}>
+                    Next ›
                   </button>
-                  <button className="ghost sm" onClick={() => void copyPath(r.runId)}>
-                    {copiedRunId === r.runId ? 'Copied' : 'Copy path'}
-                  </button>
-                  <button className="danger sm" onClick={() => void remove(r)}>
-                    Delete
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
+                </div>
+              )}
+            </div>
+          </>
         )}
       </section>
 
@@ -467,6 +657,35 @@ export function App() {
           onClose={() => setProfilesOpen(false)}
           onChange={onProfilesChanged}
         />
+      )}
+
+      {pendingDelete && (
+        <ConfirmModal
+          title={pendingDelete.length === 1 ? 'Delete recording' : `Delete ${pendingDelete.length} recordings`}
+          confirmLabel={pendingDelete.length === 1 ? 'Delete' : `Delete ${pendingDelete.length}`}
+          busy={deleting}
+          onConfirm={() => void confirmDelete()}
+          onClose={() => setPendingDelete(null)}
+        >
+          {pendingDelete.length === 1 ? (
+            <p>
+              Delete <strong>{pendingDelete[0].label}</strong>?
+            </p>
+          ) : (
+            <>
+              <p>Delete these {pendingDelete.length} recordings?</p>
+              <ul className="confirm-list">
+                {pendingDelete.map((r) => (
+                  <li key={r.runId}>{r.label}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          <p className="confirm-warn">
+            This permanently removes the run {pendingDelete.length === 1 ? 'folder' : 'folders'} and everything in{' '}
+            {pendingDelete.length === 1 ? 'it' : 'them'}. This cannot be undone.
+          </p>
+        </ConfirmModal>
       )}
     </div>
   )

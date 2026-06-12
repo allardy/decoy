@@ -153,7 +153,7 @@ function toolbarUrlBase(): string {
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1100,
-    height: 780,
+    height: 1000,
     title: 'Decoy',
     icon: WINDOW_ICON,
     backgroundColor: '#18181b',
@@ -356,21 +356,6 @@ ipcMain.handle('recording:stop', () => {
 })
 
 // Confirm an irreversible delete with a native modal before the renderer removes the run.
-ipcMain.handle('recording:confirm-delete', async (_event, label) => {
-  const parent = mainWindow instanceof BaseWindow ? mainWindow : undefined
-  const opts = {
-    type: 'warning' as const,
-    buttons: ['Cancel', 'Delete'],
-    defaultId: 0,
-    cancelId: 0,
-    title: 'Delete recording',
-    message: `Delete “${String(label ?? 'this recording')}”?`,
-    detail: 'This permanently removes the run folder and everything in it. This cannot be undone.',
-  }
-  const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts)
-
-  return { confirmed: response === 1 }
-})
 
 // Confirm deleting a profile — it wipes that session's cookies/logins, so warn before the renderer
 // calls profiles:delete.

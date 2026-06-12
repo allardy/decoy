@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld('decoy', {
   getActiveRecording: () => ipcRenderer.invoke('recording:active'),
   listRecordings: () => ipcRenderer.invoke('recording:list'),
   openRecording: (runId: string) => ipcRenderer.invoke('recording:open-folder', runId),
-  confirmDelete: (label: string) => ipcRenderer.invoke('recording:confirm-delete', label),
   deleteRecording: (runId: string) => ipcRenderer.invoke('recording:delete', runId),
   renameRecording: (runId: string, name: string) => ipcRenderer.invoke('recording:rename', runId, name),
   copyRecordingPath: (runId: string) => ipcRenderer.invoke('recording:copy-path', runId),
