@@ -14,7 +14,7 @@ import { FiltersModal } from './FiltersModal'
 import { ProfilesModal } from './ProfilesModal'
 
 // How many recordings to show per page in the list.
-const PAGE_SIZE = 20
+const PAGE_SIZE = 10
 
 // Accept a bare host ("airbnb.com") by defaulting the scheme to https://. Returns the normalized URL,
 // or null only when there's genuinely nothing to open (empty, or a host that can't be a real site).
@@ -87,6 +87,9 @@ export function App() {
   const [editingRunId, setEditingRunId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
 
+  const [tab, setTab] = useState<'recordings' | 'history'>('recordings')
+  const [filterText, setFilterText] = useState('')
+
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [pendingDelete, setPendingDelete] = useState<RecordingSummary[] | null>(null)
@@ -136,12 +139,8 @@ export function App() {
     }
   }, [loadConfig, refresh])
 
-  // Keep the page in range as the list shrinks (e.g. after a delete) and drop selections for
-  // recordings that no longer exist.
+  // Drop selections for recordings that no longer exist (e.g. after a delete).
   useEffect(() => {
-    const lastPage = Math.max(0, Math.ceil(recordings.length / PAGE_SIZE) - 1)
-
-    setPage((p) => Math.min(p, lastPage))
     setSelected((prev) => {
       const live = new Set(recordings.map((r) => r.runId))
       const next = new Set([...prev].filter((id) => live.has(id)))
@@ -150,10 +149,31 @@ export function App() {
     })
   }, [recordings])
 
-  const pageCount = Math.max(1, Math.ceil(recordings.length / PAGE_SIZE))
+  // Reset to the first page whenever the active tab or filter changes, so the visible slice can't
+  // point past the (now shorter) filtered list.
+  useEffect(() => {
+    setPage(0)
+  }, [tab, filterText])
+
+  // The filter field narrows whichever tab is active: recordings by label/host/runId, history by URL.
+  const query = filterText.trim().toLowerCase()
+  const filteredRecordings = query
+    ? recordings.filter((r) => `${r.label} ${r.host ?? ''} ${r.runId}`.toLowerCase().includes(query))
+    : recordings
+  const filteredHistory = query ? urlHistory.filter((u) => u.toLowerCase().includes(query)) : urlHistory
+
+  // Both tabs share the pager; the active tab's list drives the page count.
+  const activeCount = tab === 'recordings' ? filteredRecordings.length : filteredHistory.length
+  const pageCount = Math.max(1, Math.ceil(activeCount / PAGE_SIZE))
   const pageStart = page * PAGE_SIZE
-  const visible = recordings.slice(pageStart, pageStart + PAGE_SIZE)
+  const visible = filteredRecordings.slice(pageStart, pageStart + PAGE_SIZE)
+  const visibleHistory = filteredHistory.slice(pageStart, pageStart + PAGE_SIZE)
   const allVisibleSelected = visible.length > 0 && visible.every((r) => selected.has(r.runId))
+
+  // Clamp the page if the active list shrinks under us (delete, filter, tab switch).
+  useEffect(() => {
+    setPage((p) => Math.min(p, pageCount - 1))
+  }, [pageCount])
 
   const start = useCallback(async () => {
     setError(null)
@@ -400,7 +420,7 @@ export function App() {
           </button>
         </div>
         <datalist id="url-history">
-          {urlHistory.map((u) => (
+          {urlHistory.slice(0, 10).map((u) => (
             <option key={u} value={u} />
           ))}
         </datalist>
@@ -443,20 +463,81 @@ export function App() {
 
       <section className="card">
         <div className="card-head">
-          <h2>Recordings {recordings.length > 0 && <span className="badge-count">{recordings.length}</span>}</h2>
+          <div className="tabs" role="tablist">
+            <button
+              className={tab === 'recordings' ? 'tab active' : 'tab'}
+              role="tab"
+              aria-selected={tab === 'recordings'}
+              onClick={() => setTab('recordings')}
+            >
+              Recordings {recordings.length > 0 && <span className="badge-count">{recordings.length}</span>}
+            </button>
+            <button
+              className={tab === 'history' ? 'tab active' : 'tab'}
+              role="tab"
+              aria-selected={tab === 'history'}
+              onClick={() => setTab('history')}
+            >
+              History {urlHistory.length > 0 && <span className="badge-count">{urlHistory.length}</span>}
+            </button>
+          </div>
           <div className="rec-head-actions">
-            {selected.size > 0 && (
+            <input
+              className="filter-input"
+              value={filterText}
+              placeholder={tab === 'recordings' ? 'Filter recordings…' : 'Filter URLs…'}
+              onChange={(e) => setFilterText(e.target.value)}
+            />
+            {tab === 'recordings' && selected.size > 0 && (
               <button className="danger sm" onClick={removeSelected}>
                 Delete {selected.size} selected
               </button>
             )}
-            <button className="ghost sm" onClick={() => void refresh()}>
-              Refresh
-            </button>
+            {tab === 'recordings' && (
+              <button className="ghost sm" onClick={() => void refresh()}>
+                Refresh
+              </button>
+            )}
           </div>
         </div>
-        {recordings.length === 0 ? (
-          <p className="empty">No recordings yet.</p>
+        {tab === 'history' ? (
+          filteredHistory.length === 0 ? (
+            <p className="empty">{urlHistory.length === 0 ? 'No URL history yet.' : 'No URLs match your filter.'}</p>
+          ) : (
+            <>
+              <ul className="recordings">
+                {visibleHistory.map((u) => (
+                  <li key={u} title="Click to reuse this URL for a new recording">
+                    <button className="rec-label" onClick={() => setStartUrl(u)}>
+                      {u}
+                    </button>
+                    <span className="rec-actions">
+                      <button className="ghost sm" onClick={() => setStartUrl(u)}>
+                        Use
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {pageCount > 1 && (
+                <div className="rec-footer rec-footer-end">
+                  <div className="pager">
+                    <button className="ghost sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+                      ‹ Prev
+                    </button>
+                    <span className="pager-info">
+                      Page {page + 1} of {pageCount}
+                    </span>
+                    <button className="ghost sm" disabled={page >= pageCount - 1} onClick={() => setPage((p) => p + 1)}>
+                      Next ›
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        ) : filteredRecordings.length === 0 ? (
+          <p className="empty">{recordings.length === 0 ? 'No recordings yet.' : 'No recordings match your filter.'}</p>
         ) : (
           <>
             <ul className="recordings">

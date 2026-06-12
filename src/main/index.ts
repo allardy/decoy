@@ -153,7 +153,7 @@ function toolbarUrlBase(): string {
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1100,
-    height: 780,
+    height: 1000,
     title: 'Decoy',
     icon: WINDOW_ICON,
     backgroundColor: '#18181b',
